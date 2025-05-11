@@ -2,7 +2,7 @@
 
 namespace App\Layers;
 
-class DataLinkLayer implements LayerInterface
+class NetworkLayer implements LayerInterface
 {
     private $lowerLayer;
 
