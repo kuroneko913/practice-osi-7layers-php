@@ -5,7 +5,7 @@ namespace App\Layers;
 /**
  * 物理層
  */
-class PhysicalLayer
+class PhysicalLayer implements LayerInterface
 {
     private $fifo;
 
@@ -25,7 +25,7 @@ class PhysicalLayer
      *
      * @param string $bit
      */
-    public function sendBit(string $bit): void
+    public function send(mixed $bit): void
     {
         fwrite($this->fifo, $bit);
         fflush($this->fifo);
@@ -37,7 +37,7 @@ class PhysicalLayer
      *
      * @return string
      */
-    public function receiveBit(): string
+    public function receive(): string
     {
         return fread($this->fifo, 1);
     }
