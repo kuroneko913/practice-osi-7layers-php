@@ -1,0 +1,23 @@
+version: '3.8'
+services:
+  sender:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - fifo-volume:/tmp
+    command: sh -c "php src/sender.php"
+    tty: true  # 標準入力を有効にする場合
+
+  receiver:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - fifo-volume:/tmp
+    depends_on:
+      - sender
+    command: sh -c "php src/receiver.php"
+
+volumes:
+  fifo-volume:

@@ -1,0 +1,15 @@
+{
+    "name": "masaki.yokoyama/practice-osi-7layers-php",
+    "autoload": {
+        "psr-4": {
+            "MasakiYokoyama\\PracticeOsi7layersPhp\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "kuroneko913",
+            "email": "myblackcat7112+github@gmail.com"
+        }
+    ],
+    "require": {}
+}
