@@ -2,29 +2,30 @@
 
 namespace App;
 
+require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
+
+use App\Layers\PhysicalLayer;
+
 class Sender    
 {
     /**
-     * @var resource|false
+     * @var PhysicalLayer
      */
-    private $fifo;
+    private $physicalLayer;
 
-    public function __construct()
+    public function __construct(PhysicalLayer $physicalLayer)
     {
-        $this->fifo = fopen('/tmp/bitfifo', 'w');
+        $this->physicalLayer = $physicalLayer;
     }
 
     public function run()
     {
         // 標準入力からデータを受け取り、FIFOに1bitずつ書き込む
         $input = trim(fgets(STDIN));
-        $fifo = fopen('/tmp/bitfifo', 'w');
-
         for ($i = 0; $i < strlen($input); $i++) {
             $this->log($input[$i]);
-            fwrite($fifo, $input[$i]);
+            $this->physicalLayer->sendBit($input[$i]);
         }
-        fclose($fifo);
     }
 
     private function log($message)
@@ -36,6 +37,8 @@ class Sender
 }
 
 echo "start sender\n";
-$sender = new Sender();
+$fifo = '/tmp/bitfifo';
+$writeMode = 'w';
+$sender = new Sender(new PhysicalLayer($fifo, $writeMode));
 $sender->run();
 echo "end sender\n";

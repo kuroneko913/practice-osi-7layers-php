@@ -2,7 +2,7 @@
     "name": "masaki.yokoyama/practice-osi-7layers-php",
     "autoload": {
         "psr-4": {
-            "MasakiYokoyama\\PracticeOsi7layersPhp\\": "src/"
+            "App\\": "src/"
         }
     },
     "authors": [
