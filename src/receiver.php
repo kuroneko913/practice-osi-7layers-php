@@ -4,29 +4,30 @@ namespace App;
 
 require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
 
+use App\Layers\LayerInterface;
 use App\Layers\PhysicalLayer;
 
 class Receiver
 {
     /**
-     * @var PhysicalLayer
+     * @var LayerInterface
      */
-    private $physicalLayer;
+    private $layer;
 
-    public function __construct(PhysicalLayer $physicalLayer)
+    public function __construct(LayerInterface $layer)
     {
-        $this->physicalLayer = $physicalLayer;
+        $this->layer = $layer;
     }
 
     public function run()
     {
         while (true) {
-            $bit = $this->physicalLayer->receiveBit();
-            if ($bit === false || $bit === '') {
+            $data = $this->layer->receive();
+            if ($data === false || $data === '') {
                 usleep(100000);
                 continue;
             }
-            $this->log($bit);
+            $this->log($data);
         }
     }
 

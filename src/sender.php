@@ -4,18 +4,19 @@ namespace App;
 
 require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
 
+use App\Layers\LayerInterface;
 use App\Layers\PhysicalLayer;
 
-class Sender    
+class Sender
 {
     /**
-     * @var PhysicalLayer
+     * @var LayerInterface
      */
-    private $physicalLayer;
+    private $layer;
 
-    public function __construct(PhysicalLayer $physicalLayer)
+    public function __construct(LayerInterface $layer)
     {
-        $this->physicalLayer = $physicalLayer;
+        $this->layer = $layer;
     }
 
     public function run()
@@ -24,7 +25,7 @@ class Sender
         $input = trim(fgets(STDIN));
         for ($i = 0; $i < strlen($input); $i++) {
             $this->log($input[$i]);
-            $this->physicalLayer->sendBit($input[$i]);
+            $this->layer->send($input[$i]);
         }
     }
 
@@ -39,6 +40,7 @@ class Sender
 echo "start sender\n";
 $fifo = '/tmp/bitfifo';
 $writeMode = 'w';
-$sender = new Sender(new PhysicalLayer($fifo, $writeMode));
+$physicalLayer = new PhysicalLayer($fifo, $writeMode);
+$sender = new Sender($physicalLayer);
 $sender->run();
 echo "end sender\n";
