@@ -2,29 +2,32 @@
 
 namespace App;
 
+require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
+
+use App\Layers\PhysicalLayer;
+
 class Receiver
 {
     /**
-     * @var resource|false
+     * @var PhysicalLayer
      */
-    private $fifo;
+    private $physicalLayer;
 
-    public function __construct()
+    public function __construct(PhysicalLayer $physicalLayer)
     {
-        $this->fifo = fopen('/tmp/bitfifo', 'r');
+        $this->physicalLayer = $physicalLayer;
     }
 
     public function run()
     {
         while (true) {
-            $bit = fread($this->fifo, 1);
+            $bit = $this->physicalLayer->receiveBit();
             if ($bit === false || $bit === '') {
                 usleep(100000);
                 continue;
             }
             $this->log($bit);
         }
-        fclose($this->fifo);
     }
 
     private function log($message)
@@ -36,6 +39,9 @@ class Receiver
 }
 
 echo "start receiver\n";
-$receiver = new Receiver();
+$fifo = '/tmp/bitfifo';
+$readMode = 'r';
+$physicalLayer = new PhysicalLayer($fifo, $readMode);
+$receiver = new Receiver($physicalLayer);
 $receiver->run();
 echo "end receiver\n";
