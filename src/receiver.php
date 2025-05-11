@@ -12,6 +12,7 @@ use App\Layers\TransportLayer;
 use App\Layers\SessionLayer;
 use App\Layers\PresentationLayer;
 use App\Layers\ApplicationLayer;
+use App\Layers\DataLinkLayer\Factory;
 
 class Receiver
 {
@@ -46,10 +47,14 @@ class Receiver
 }
 
 echo "start receiver\n";
+// 別なレイヤーで追加されるはずだが今はここで設定
+$receiverIp = '192.168.1.2';
+$type = '0x0800';
 
 // 各層のインスタンスを作成
 $physicalLayer = new PhysicalLayer('/tmp/bitfifo', 'r');
-$dataLinkLayer = new DataLinkLayer($physicalLayer);
+// どこから来たのかはframeのsrcで判断する
+$dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverIp);
 $networkLayer = new NetworkLayer($dataLinkLayer);
 $transportLayer = new TransportLayer($networkLayer);
 $sessionLayer = new SessionLayer($transportLayer);
