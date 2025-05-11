@@ -6,6 +6,12 @@ require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
 
 use App\Layers\LayerInterface;
 use App\Layers\PhysicalLayer;
+use App\Layers\DataLinkLayer;
+use App\Layers\NetworkLayer;
+use App\Layers\TransportLayer;
+use App\Layers\SessionLayer;
+use App\Layers\PresentationLayer;
+use App\Layers\ApplicationLayer;
 
 class Receiver
 {
@@ -40,9 +46,17 @@ class Receiver
 }
 
 echo "start receiver\n";
-$fifo = '/tmp/bitfifo';
-$readMode = 'r';
-$physicalLayer = new PhysicalLayer($fifo, $readMode);
-$receiver = new Receiver($physicalLayer);
+
+// 各層のインスタンスを作成
+$physicalLayer = new PhysicalLayer('/tmp/bitfifo', 'r');
+$dataLinkLayer = new DataLinkLayer($physicalLayer);
+$networkLayer = new NetworkLayer($dataLinkLayer);
+$transportLayer = new TransportLayer($networkLayer);
+$sessionLayer = new SessionLayer($transportLayer);
+$presentationLayer = new PresentationLayer($sessionLayer);
+$applicationLayer = new ApplicationLayer($presentationLayer);
+
+// 受信側のインスタンスを作成
+$receiver = new Receiver($applicationLayer);
 $receiver->run();
 echo "end receiver\n";
