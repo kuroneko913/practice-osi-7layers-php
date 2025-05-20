@@ -51,7 +51,8 @@ $receiverIp = '192.168.1.2';
 $type = '0x0800'; // デフォルトのIPプロトコル
 
 // 各層のインスタンスを作成
-$physicalLayer = new PhysicalLayer('/tmp/bitfifo', 'w');
+$cablePath = '/fifo/bitfifo';
+$physicalLayer = new PhysicalLayer($cablePath, 'w');
 $dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverIp, from:$senderIp);
 $networkLayer = new NetworkLayer($dataLinkLayer);
 $transportLayer = new TransportLayer($networkLayer);

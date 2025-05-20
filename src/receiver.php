@@ -6,7 +6,6 @@ require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
 
 use App\Layers\LayerInterface;
 use App\Layers\PhysicalLayer;
-use App\Layers\DataLinkLayer;
 use App\Layers\NetworkLayer;
 use App\Layers\TransportLayer;
 use App\Layers\SessionLayer;
@@ -31,7 +30,6 @@ class Receiver
         while (true) {
             $data = $this->layer->receive();
             if ($data === false || $data === '') {
-                usleep(100000);
                 continue;
             }
             $this->log($data);
@@ -46,13 +44,20 @@ class Receiver
     }
 }
 
+// FIFOファイルの初期化(物理ケーブルの抜き差し相当)
+$cablePath = '/fifo/bitfifo';
+if (file_exists($cablePath)) {
+    unlink($cablePath);
+}
+posix_mkfifo($cablePath, 0666);
+
 echo "start receiver\n";
 // 別なレイヤーで追加されるはずだが今はここで設定
 $receiverIp = '192.168.1.2';
 $type = '0x0800';
 
 // 各層のインスタンスを作成
-$physicalLayer = new PhysicalLayer('/tmp/bitfifo', 'r');
+$physicalLayer = new PhysicalLayer($cablePath, 'r');
 // どこから来たのかはframeのsrcで判断する
 $dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverIp);
 $networkLayer = new NetworkLayer($dataLinkLayer);

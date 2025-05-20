@@ -44,6 +44,8 @@ class PhysicalLayer implements LayerInterface
 
     public function __destruct()
     {
-        fclose($this->fifo);
+        if (is_resource($this->fifo)) {
+            fclose($this->fifo);
+        }
     }
 }

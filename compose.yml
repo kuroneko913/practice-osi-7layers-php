@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     volumes:
-      - fifo-volume:/tmp
+      - ./tmp:/fifo
     command: sh -c "php src/sender.php"
     tty: true  # 標準入力を有効にする場合
 
@@ -14,10 +14,8 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     volumes:
-      - fifo-volume:/tmp
+      - ./tmp:/fifo
     depends_on:
       - sender
     command: sh -c "php src/receiver.php"
 
-volumes:
-  fifo-volume:
