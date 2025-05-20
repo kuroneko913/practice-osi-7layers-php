@@ -13,7 +13,7 @@ sender:
 	docker-compose run --rm -T sender 
 
 receiver:
-	docker-compose run --rm receiver
+	docker compose build && docker-compose run --rm receiver
 
 clean:
 	docker compose down -v --remove-orphans
