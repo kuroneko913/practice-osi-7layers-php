@@ -51,15 +51,16 @@ if (file_exists($cablePath)) {
 }
 posix_mkfifo($cablePath, 0666);
 
-echo "start receiver\n";
 // 別なレイヤーで追加されるはずだが今はここで設定
-$receiverIp = '192.168.1.2';
+$receiverMac = 'aabbccddee02';
 $type = '0x0800';
+
+echo "start receiver ($receiverMac)\n\n";
 
 // 各層のインスタンスを作成
 $physicalLayer = new PhysicalLayer($cablePath, 'r');
 // どこから来たのかはframeのsrcで判断する
-$dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverIp);
+$dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverMac);
 $networkLayer = new NetworkLayer($dataLinkLayer);
 $transportLayer = new TransportLayer($networkLayer);
 $sessionLayer = new SessionLayer($transportLayer);

@@ -100,6 +100,7 @@ class BitFrameBuilder implements FrameBuilderInterface
         if ($expectedCrc !== $actualCrc) {
             return null;
         }
+        echo "\n{dest: $dest, src: $src, type: $type}\n";
         return $payloadTrimmed;
     }
 

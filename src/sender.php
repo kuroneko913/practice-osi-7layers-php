@@ -44,16 +44,17 @@ class Sender
     }
 }
 
-echo "start sender\n";
 // 別なレイヤーで追加されるはずだが今はここで設定
-$senderIp = '192.168.1.1';
-$receiverIp = '192.168.1.2';
+$senderMac = 'aabbccddee01';
+$receiverMac = 'aabbccddee02';
 $type = '0x0800'; // デフォルトのIPプロトコル
+
+echo "start sender ($senderMac)\n\n";
 
 // 各層のインスタンスを作成
 $cablePath = '/fifo/bitfifo';
 $physicalLayer = new PhysicalLayer($cablePath, 'w');
-$dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverIp, from:$senderIp);
+$dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverMac, from:$senderMac);
 $networkLayer = new NetworkLayer($dataLinkLayer);
 $transportLayer = new TransportLayer($networkLayer);
 $sessionLayer = new SessionLayer($transportLayer);

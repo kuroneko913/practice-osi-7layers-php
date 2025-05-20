@@ -48,6 +48,7 @@ class StringFrameBuilder implements FrameBuilderInterface
         if (!isset($frame['PAYLOAD'])) {
             return null;
         }
+        echo "\n{src:{$frame['SRC']}, dest:{$frame['DEST']}, type:{$frame['TYPE']}}\n";
         return $frame['PAYLOAD'];
     }
 
