@@ -4,6 +4,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    environment:
+      - FIFO_PATH=/fifo/bitfifo
+      - MACADDRESS=aabbccddee01
     volumes:
       - ./tmp:/fifo
     command: sh -c "php src/sender.php"
@@ -13,6 +16,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    environment:
+      - FIFO_PATH=/fifo/bitfifo
+      - MACADDRESS=aabbccddee02
     volumes:
       - ./tmp:/fifo
     depends_on:

@@ -45,14 +45,16 @@ class Sender
 }
 
 // 別なレイヤーで追加されるはずだが今はここで設定
-$senderMac = 'aabbccddee01';
+// 自分のMACアドレス
+$senderMac = getenv('MACADDRESS') ?? null;
+// 宛先MACアドレス
 $receiverMac = 'aabbccddee02';
 $type = '0x0800'; // デフォルトのIPプロトコル
 
 echo "start sender ($senderMac)\n\n";
 
 // 各層のインスタンスを作成
-$cablePath = '/fifo/bitfifo';
+$cablePath = getenv('FIFO_PATH') ?? null;
 $physicalLayer = new PhysicalLayer($cablePath, 'w');
 $dataLinkLayer = Factory::createBit($physicalLayer, type:$type, to:$receiverMac, from:$senderMac);
 $networkLayer = new NetworkLayer($dataLinkLayer);

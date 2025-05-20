@@ -45,14 +45,15 @@ class Receiver
 }
 
 // FIFOファイルの初期化(物理ケーブルの抜き差し相当)
-$cablePath = '/fifo/bitfifo';
+$cablePath = getenv('FIFO_PATH') ?? null;
 if (file_exists($cablePath)) {
     unlink($cablePath);
 }
 posix_mkfifo($cablePath, 0666);
 
 // 別なレイヤーで追加されるはずだが今はここで設定
-$receiverMac = 'aabbccddee02';
+// 自分のMACアドレス
+$receiverMac = getenv('MACADDRESS') ?? null;
 $type = '0x0800';
 
 echo "start receiver ($receiverMac)\n\n";
