@@ -15,23 +15,25 @@ class StringFrameBuilder implements FrameBuilderInterface
 
     public function buildFrame(string $data): string
     {
-        $crc = crc32($data);
+        $crc = sprintf('%u', crc32($data));
         $frame = "<FRAME>DEST:$this->to|SRC:$this->from|TYPE:$this->type|PAYLOAD:$data|CRC:$crc</FRAME>";
         return $frame;
     }
 
     public function parseFrame(string $raw): ?string
     {
-        // フレームをパース
-        if (!preg_match('/<FRAME>(.*?)<\/FRAME>/', $raw, $matches)) {
+        // フレームをパースして各フィールドを正確に抽出
+        $pattern = '/<FRAME>DEST:(?<dest>[^|]+)\|SRC:(?<src>[^|]+)\|TYPE:(?<type>[^|]+)\|PAYLOAD:(?<payload>.*)\|CRC:(?<crc>\d+)<\/FRAME>/';
+        if (!preg_match($pattern, $raw, $matches)) {
             return null;
         }
-        $parts = explode('|', $matches[1]);
-        $frame = [];
-        foreach ($parts as $part) {
-            $item = explode(':', $part, 2);
-            $frame[$item[0]] = $item[1];
-        }
+        $frame = [
+            'DEST'    => $matches['dest'],
+            'SRC'     => $matches['src'],
+            'TYPE'    => $matches['type'],
+            'PAYLOAD' => $matches['payload'],
+            'CRC'     => $matches['crc'],
+        ];
         // 型が一致しない場合は破棄
         if ($frame['TYPE'] !== $this->type) {
             return null;
@@ -41,8 +43,12 @@ class StringFrameBuilder implements FrameBuilderInterface
             return null;
         }
         // CRCが一致しない場合は破棄
-        if (isset($frame['CRC']) && $frame['CRC'] !== (string)crc32($frame['PAYLOAD'])) {
-            return null;
+        if (isset($frame['CRC'])) {
+            $expected = sprintf('%u', crc32($frame['PAYLOAD']));
+            if ($frame['CRC'] !== $expected) {
+                echo "[parseFrame] crc mismatch: {$frame['CRC']} != {$expected}\n";
+                return null;
+            }
         }
         // ペイロードがない場合は破棄
         if (!isset($frame['PAYLOAD'])) {
@@ -52,6 +58,11 @@ class StringFrameBuilder implements FrameBuilderInterface
         return $frame['PAYLOAD'];
     }
 
+    public function getPreamble(): string
+    {
+        return '<FRAME>';
+    }
+
     /**
      * フレームが終了しているかどうかを判断する
      * @param string $raw
@@ -59,14 +70,18 @@ class StringFrameBuilder implements FrameBuilderInterface
      */
     public function isFrameEnd(string $raw): bool
     {
-        return preg_match('/<FRAME>(.*?)<\/FRAME>/', $raw, $matches);
+        // frame end detected by presence of closing tag
+        return str_contains($raw, '</FRAME>');
     }
 
     public function getFrameLength(string $raw): int
     {
-        if (preg_match('/<FRAME>.*?<\/FRAME>/', $raw, $matches)) {
-            return strlen($matches[0]);
+        $endTag = '</FRAME>';
+        $pos = strpos($raw, $endTag);
+        if ($pos === false) {
+            return 0;
         }
-        return 0;
+        // タグ位置 + タグ長 ＝ フレーム全体の長さ
+        return $pos + strlen($endTag);
     }
 }

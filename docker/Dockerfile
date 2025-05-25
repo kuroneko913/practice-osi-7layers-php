@@ -9,8 +9,8 @@ RUN apt-get update \
 
 RUN echo "date.timezone=Asia/Tokyo" > /usr/local/etc/php/conf.d/timezone.ini
 
-COPY composer.json .
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+COPY composer.json /app/composer.json
 
 COPY src/ ./src/
 RUN composer install

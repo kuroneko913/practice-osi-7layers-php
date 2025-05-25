@@ -3,6 +3,7 @@
 namespace App\Layers;
 
 use App\Layers\DataLinkLayer\FrameBuilderInterface;
+use Psr\Log\LoggerInterface;
 
 class DataLinkLayer implements LayerInterface
 {
@@ -13,7 +14,8 @@ class DataLinkLayer implements LayerInterface
      */
     public function __construct(
         private LayerInterface $lowerLayer,
-        private FrameBuilderInterface $frameBuilder
+        private FrameBuilderInterface $frameBuilder,
+        private ?LoggerInterface $logger = null,
      ) {}
 
     public function send(mixed $data): void
@@ -27,20 +29,18 @@ class DataLinkLayer implements LayerInterface
         }
     }
 
-    public function receive(): mixed
+    public function receive(): ?string
     {
         $buffer = '';
-        while (true) {
-            $raw = $this->lowerLayer->receive();
-            $buffer .= $raw;
-            if (!$this->frameBuilder->isFrameEnd($buffer)) {
-                continue;
-            }
-            // フレームが完成したらパースする
-            $frame = $this->frameBuilder->parseFrame($buffer);
-            $frameLength = $this->frameBuilder->getFrameLength($buffer);
-            $buffer = substr($buffer, $frameLength);
-            return $frame;
+        while (!$this->frameBuilder->isFrameEnd($buffer)) {
+            // 物理層からbit列を受信
+            $buffer .= $this->lowerLayer->receive();
         }
+        echo "[receive] buffer: " . strlen($buffer) . " bits\n";
+        $length = $this->frameBuilder->getFrameLength($buffer);
+        $chunk = substr($buffer, 0, $length);
+        $this->logger->info('Received frame', ['chunk' => $chunk]);
+        $frame = $this->frameBuilder->parseFrame($chunk);
+        return $frame;
     }
 }

@@ -4,23 +4,23 @@ build:
 	docker compose build
 
 up:
-	docker-compose up -d
+	docker compose up -d
 
 down:
-	docker-compose down
+	docker compose down
 
 sender:
-	docker-compose run --rm -T sender 
+	docker compose run --rm -T sender 
 
 receiver:
-	docker compose build && docker-compose run --rm receiver
+	docker compose run --rm receiver
 
 clean:
 	docker compose down -v --remove-orphans
 	docker system prune -f
 
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 help:
 	@echo "make build   # Dockerイメージをビルド"

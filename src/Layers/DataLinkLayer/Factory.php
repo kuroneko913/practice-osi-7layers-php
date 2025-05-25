@@ -5,7 +5,7 @@ namespace App\Layers\DataLinkLayer;
 use App\Layers\LayerInterface;
 use App\Layers\DataLinkLayer;
 use App\Layers\DataLinkLayer\StringFrameBuilder;
-use App\Layers\DataLinkLayer\BitFrameBuilder;
+use Psr\Log\LoggerInterface;
 
 class Factory
 {
@@ -13,21 +13,23 @@ class Factory
         LayerInterface $lowerLayer,
         string $type = '',
         string $to = '',
-        string $from = ''
+        string $from = '',
+        ?LoggerInterface $logger = null,
     ): DataLinkLayer
     {
         $builder = new StringFrameBuilder($to, $from, $type);
-        return new DataLinkLayer($lowerLayer, $builder);
+        return new DataLinkLayer(lowerLayer:$lowerLayer, frameBuilder:$builder, logger:$logger);
     }
 
-    public static function createBit(
+    public static function createEthernet(
         LayerInterface $lowerLayer,
         string $type = '',
         string $to = '',
-        string $from = ''
+        string $from = '',
+        ?LoggerInterface $logger = null,
     ): DataLinkLayer
     {
-        $builder = new BitFrameBuilder($to, $from, $type);
-        return new DataLinkLayer($lowerLayer, $builder);
+        $builder = new EthernetFrameBuilder($to, $from, $type);
+        return new DataLinkLayer(lowerLayer:$lowerLayer, frameBuilder:$builder, logger:$logger);
     }
 }

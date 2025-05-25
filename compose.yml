@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   sender:
     build:
@@ -7,10 +6,13 @@ services:
     environment:
       - FIFO_PATH=/fifo/bitfifo
       - MACADDRESS=aabbccddee01
+      - IPADDRESS=192.168.1.1
     volumes:
+      - ./:/app/
       - ./tmp:/fifo
     command: sh -c "php src/sender.php"
     tty: true  # 標準入力を有効にする場合
+    container_name: sender
 
   receiver:
     build:
@@ -19,9 +21,10 @@ services:
     environment:
       - FIFO_PATH=/fifo/bitfifo
       - MACADDRESS=aabbccddee02
+      - IPADDRESS=192.168.1.2
     volumes:
+      - ./:/app/
       - ./tmp:/fifo
-    depends_on:
-      - sender
     command: sh -c "php src/receiver.php"
-
+    tty: true
+    container_name: receiver
