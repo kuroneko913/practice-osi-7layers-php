@@ -9,6 +9,9 @@ use App\Layers\DataLinkLayer\Factory as DataLinkLayerFactory;
 use App\Layers\DataLinkLayer\FrameInterface;
 use App\Layers\DataLinkLayer\MacAddress;
 use App\Layers\DuplexPhysicalLayer;
+use App\Layers\NetworkLayer;
+use App\Layers\NetworkLayer\IpAddress;
+use App\Layers\NetworkLayer\Ipv4Packet;
 use App\Layers\PhysicalLink;
 
 /**
@@ -18,13 +21,13 @@ use App\Layers\PhysicalLink;
 class SwitchLab
 {
     private const NODES = [
-        'A' => ['port' => 1, 'mac' => 'aabbccddee0a'],
-        'B' => ['port' => 2, 'mac' => 'aabbccddee0b'],
-        'C' => ['port' => 3, 'mac' => 'aabbccddee0c'],
-        'D' => ['port' => 4, 'mac' => 'aabbccddee0d'],
+        'A' => ['port' => 1, 'mac' => 'aabbccddee0a', 'ip' => '192.168.1.1'],
+        'B' => ['port' => 2, 'mac' => 'aabbccddee0b', 'ip' => '192.168.1.2'],
+        'C' => ['port' => 3, 'mac' => 'aabbccddee0c', 'ip' => '192.168.1.3'],
+        'D' => ['port' => 4, 'mac' => 'aabbccddee0d', 'ip' => '192.168.1.4'],
     ];
 
-    /** @var array<string, array{phy: DuplexPhysicalLayer, link: PhysicalLink, dl: DataLinkLayer, mac: MacAddress, port: int}> */
+    /** @var array<string, array{phy: DuplexPhysicalLayer, link: PhysicalLink, dl: DataLinkLayer, net: NetworkLayer, mac: MacAddress, ip: IpAddress, port: int}> */
     private array $pcs = [];
 
     /** @var array<int, array{phy: DuplexPhysicalLayer, link: PhysicalLink}> PCを移動した後のポート */
@@ -78,8 +81,8 @@ class SwitchLab
     {
         echo "4台のPC (A, B, C, D) のNICと物理層を初期化しています...\n";
         foreach (self::NODES as $name => $node) {
-            $this->plugIn($name, $node['port'], new MacAddress($node['mac']));
-            echo "  ✓ PC-$name: Port {$node['port']}, MAC: {$node['mac']}\n";
+            $this->plugIn($name, $node['port'], new MacAddress($node['mac']), new IpAddress($node['ip']));
+            echo "  ✓ PC-$name: Port {$node['port']}, MAC: {$node['mac']}, IP: {$node['ip']}\n";
         }
         echo "\n";
     }
@@ -91,7 +94,7 @@ class SwitchLab
         return new DuplexPhysicalLayer($tx, $rx, intervalUs: 0); // 実験のため高速送信
     }
 
-    private function plugIn(string $name, int $port, MacAddress $mac): void
+    private function plugIn(string $name, int $port, MacAddress $mac, IpAddress $ip): void
     {
         $link = new PhysicalLink("{$this->fifoDir}/port_{$port}.link");
         if (!$link->plugIn()) {
@@ -106,7 +109,9 @@ class SwitchLab
             'phy' => $phy,
             'link' => $link,
             'dl' => $dl,
+            'net' => new NetworkLayer($dl, $ip, $mac),
             'mac' => $mac,
+            'ip' => $ip,
             'port' => $port,
         ];
     }
@@ -121,7 +126,7 @@ class SwitchLab
             'phy' => $this->pcs[$name]['phy'],
             'link' => $this->pcs[$name]['link'],
         ];
-        $this->plugIn($name, $newPort, $this->pcs[$name]['mac']);
+        $this->plugIn($name, $newPort, $this->pcs[$name]['mac'], $this->pcs[$name]['ip']);
     }
 
     /**
@@ -138,9 +143,9 @@ class SwitchLab
 
     /**
      * PCの設定のまま、別のPCがつないでいた伝送線につなぎ替える
-     * @param array{mac: MacAddress} $pc
+     * @param array{mac: MacAddress, ip: IpAddress} $pc
      * @param array{phy: DuplexPhysicalLayer, link: PhysicalLink, port: int} $line
-     * @return array{phy: DuplexPhysicalLayer, link: PhysicalLink, dl: DataLinkLayer, mac: MacAddress, port: int}
+     * @return array{phy: DuplexPhysicalLayer, link: PhysicalLink, dl: DataLinkLayer, net: NetworkLayer, mac: MacAddress, ip: IpAddress, port: int}
      */
     private function connectTo(array $pc, array $line): array
     {
@@ -149,7 +154,9 @@ class SwitchLab
             'phy' => $line['phy'],
             'link' => $line['link'],
             'dl' => $dl,
+            'net' => new NetworkLayer($dl, $pc['ip'], $pc['mac']),
             'mac' => $pc['mac'],
+            'ip' => $pc['ip'],
             'port' => $line['port'],
         ];
     }
@@ -168,6 +175,65 @@ class SwitchLab
     }
 
     /**
+     * スイッチの2つのポートをケーブルでつなぐ (ループの作成)
+     *
+     * @return array<int, array{phy: DuplexPhysicalLayer, link: PhysicalLink}> ケーブルの両端
+     */
+    public function plugLoopCable(int $portA, int $portB): array
+    {
+        $ends = [];
+        foreach ([$portA, $portB] as $port) {
+            $link = new PhysicalLink("{$this->fifoDir}/port_{$port}.link");
+            if (!$link->plugIn()) {
+                throw new \RuntimeException("Port $port にはすでに別の機器が接続しています");
+            }
+            $phy = $this->openPort($port);
+            $phy->clear();
+            $ends[] = ['phy' => $phy, 'link' => $link];
+        }
+        usleep(200000); // スイッチがリンクアップを検知するまで待つ
+
+        return $ends;
+    }
+
+    /**
+     * ループ用のケーブルの信号を、指定した時間だけ反対側へ流す
+     *
+     * @param array<int, array{phy: DuplexPhysicalLayer, link: PhysicalLink}> $ends
+     * @return array{relayed: int, received: array<string, int>}
+     */
+    public function relayLoopCable(array $ends, float $seconds): array
+    {
+        $relayed = 0;
+        $received = array_fill_keys(array_keys($this->pcs), 0);
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            foreach ([[0, 1], [1, 0]] as [$from, $to]) {
+                $burst = $ends[$from]['phy']->tryReceive();
+                if ($burst !== null) {
+                    $ends[$to]['phy']->send($burst);
+                    $relayed++;
+                }
+            }
+            foreach ($this->pcs as $name => $pc) {
+                while ($pc['phy']->tryReceive() !== null) {
+                    $received[$name]++;
+                }
+            }
+            usleep(500);
+        }
+        return ['relayed' => $relayed, 'received' => $received];
+    }
+
+    /**
+     * スイッチのログのうち、指定した文字列を含む行を数える
+     */
+    public function countSwitchLogLines(string $needle): int
+    {
+        return substr_count((string)file_get_contents($this->switchLogPath), $needle);
+    }
+
+    /**
      * PCのケーブルを抜く
      */
     public function unplug(string $name, int $waitMs = 200): void
@@ -182,7 +248,7 @@ class SwitchLab
     public function plugBack(string $name, int $waitMs = 200): void
     {
         $pc = $this->pcs[$name];
-        $this->plugIn($name, $pc['port'], $pc['mac']);
+        $this->plugIn($name, $pc['port'], $pc['mac'], $pc['ip']);
         usleep($waitMs * 1000); // スイッチがリンクアップを検知するまで待つ
     }
 
@@ -204,6 +270,66 @@ class SwitchLab
         $padded = str_pad($payload, EthernetFrame::MIN_PAYLOAD_BYTES, "\0");
         $frame = new EthernetFrame($to, $src, EtherType::LocalExperimental->toInt(), $padded);
         $this->transmit($from, $frame->toWire());
+    }
+
+    public function ip(string $name): IpAddress
+    {
+        return $this->pcs[$name]['ip'];
+    }
+
+    /**
+     * IPアドレス宛てにパケットを送信する。MACアドレスが不明ならARPで解決する
+     */
+    public function sendPacket(string $from, string $payload, IpAddress $to): void
+    {
+        $this->pcs[$from]['net']->sendPacket($payload, $to);
+    }
+
+    /**
+     * 全PCのネットワーク層を動かして、通信が落ち着くまで処理する
+     * @return array<string, Ipv4Packet[]> PCごとの受信パケット
+     */
+    public function exchange(int $rounds = 5): array
+    {
+        $received = [];
+        for ($i = 0; $i < $rounds; $i++) {
+            usleep(100000); // 100ms
+            foreach ($this->pcs as $name => $pc) {
+                while ($this->hasIncoming($pc)) {
+                    $packet = $pc['net']->receive();
+                    if ($packet !== null) {
+                        $received[$name][] = $packet;
+                    }
+                }
+            }
+        }
+        return $received;
+    }
+
+    /**
+     * @param array{phy: DuplexPhysicalLayer, dl: DataLinkLayer, net: NetworkLayer} $pc
+     */
+    private function hasIncoming(array $pc): bool
+    {
+        if ($pc['net']->hasLocalPackets() || $pc['dl']->hasPendingFrame() || $pc['phy']->hasBufferedBurst()) {
+            return true;
+        }
+        $read = [$pc['phy']->getRxStream()];
+        $write = null;
+        $except = null;
+        return (bool)@stream_select($read, $write, $except, 0, 0);
+    }
+
+    /**
+     * ARPキャッシュの内容を表示する
+     */
+    public function printArpTable(string $name): void
+    {
+        echo "  [PC-$name] ARPキャッシュ:\n";
+        foreach ($this->pcs[$name]['net']->getArpTable()->getEntries() as $entry) {
+            $kind = $entry['expiresAt'] === null ? '自分' : '学習';
+            echo "    {$entry['ip']} -> {$entry['mac']->format()} ($kind)\n";
+        }
     }
 
     public function send(string $from, string $message, MacAddress $to): void
@@ -284,11 +410,16 @@ class SwitchLab
 
     /**
      * スイッチのログを表示してスイッチを停止する
+     * @param int|null $lastLines 表示する末尾の行数 (null なら全部)
      */
-    public function finish(): void
+    public function finish(?int $lastLines = null): void
     {
         echo "【スイッチ内部の動作ログ (switch.log)】\n";
-        echo file_get_contents($this->switchLogPath);
+        $log = (string)file_get_contents($this->switchLogPath);
+        if ($lastLines !== null) {
+            $log = implode("\n", array_slice(explode("\n", $log), -$lastLines));
+        }
+        echo $log;
         $this->stop();
     }
 

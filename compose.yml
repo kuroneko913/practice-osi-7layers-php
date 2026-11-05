@@ -11,7 +11,7 @@ services:
       - ./:/app/
       - ./tmp:/fifo
     command: sh -c "php src/sender.php"
-    tty: true  # 標準入力を有効にする場合
+    tty: true # 標準入力を有効にする場合
     container_name: sender
 
   receiver:

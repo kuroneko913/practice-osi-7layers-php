@@ -6,12 +6,18 @@ require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
 
 use App\Layers\DuplexPhysicalLayer;
 use App\Layers\PhysicalLink;
+use App\Layers\DataLinkLayer\EtherType;
 use App\Layers\DataLinkLayer\Factory as DataLinkLayerFactory;
 use App\Layers\DataLinkLayer\MacAddress;
 use App\Layers\DataLinkLayer;
+use App\Layers\NetworkLayer;
+use App\Layers\NetworkLayer\IpAddress;
+
+// ARPの応答を待つ時間 (ワンショット送信モード)
+const ARP_WAIT_SECONDS = 2.0;
 
 // コマンドライン引数をパース
-$options = getopt('', ['config:', 'ethers:', 'name:', 'port:', 'mac:', 'to:', 'message:', 'promiscuous']);
+$options = getopt('', ['config:', 'ethers:', 'hosts:', 'name:', 'port:', 'mac:', 'ip:', 'to:', 'message:', 'promiscuous']);
 
 $config = isset($options['config']) ? loadNodeConfig($options['config']) : [];
 
@@ -21,14 +27,23 @@ $port = (string)($options['port'] ?? (getenv('PORT') ?: ($config['port'] ?? ''))
 $mac = MacAddress::tryFromHex((string)($options['mac'] ?? (getenv('MACADDRESS') ?: ($config['mac'] ?? ''))));
 if (!ctype_digit($port) || $mac === null) {
     echo "使い方: php src/node.php --config=<設定ファイル> [--to=<宛先> --message=<メッセージ>]\n";
-    echo "        php src/node.php --port=<ポート番号> --mac=<12桁のMACアドレス> [--name=<表示名>] [--ethers=<ethersファイル>] [--promiscuous]\n";
-    echo "        (環境変数 PORT, MACADDRESS, NODE_NAME でも指定できます)\n";
+    echo "        php src/node.php --port=<ポート番号> --mac=<12桁のMACアドレス> [--ip=<IPアドレス>] [--name=<表示名>] [--hosts=<hostsファイル>] [--ethers=<ethersファイル>] [--promiscuous]\n";
+    echo "        (環境変数 PORT, MACADDRESS, IPADDRESS, NODE_NAME でも指定できます)\n";
+    exit(1);
+}
+
+$ipInput = (string)($options['ip'] ?? (getenv('IPADDRESS') ?: ($config['ip'] ?? '')));
+$ip = IpAddress::tryFromString($ipInput);
+if ($ipInput !== '' && $ip === null) {
+    echo "⚠️ IPアドレスの形式が不正です: $ipInput\n";
     exit(1);
 }
 
 $name = $options['name'] ?? (getenv('NODE_NAME') ?: ($config['name'] ?? "Port{$port}"));
 
 // 宛先の名前解決に使うアドレス帳 (省略可)
+$hostsPath = $options['hosts'] ?? $config['hosts'] ?? null;
+$hosts = $hostsPath === null ? [] : loadHosts($hostsPath);
 $ethersPath = $options['ethers'] ?? $config['ethers'] ?? null;
 $ethers = $ethersPath === null ? [] : loadEthers($ethersPath);
 
@@ -44,7 +59,8 @@ echo "  接続ポート: Port $port\n";
 echo "  自MAC:      " . $mac->format() . " ({$mac->toHex()})\n";
 echo "  Tx伝送線:   $txPath\n";
 echo "  Rx伝送線:   $rxPath\n";
-echo "  アドレス帳: " . ($ethersPath ?? '(なし)') . "\n";
+echo "  自IP:       " . ($ip ?? '(なし)') . "\n";
+echo "  アドレス帳: " . (implode(', ', array_filter([$hostsPath, $ethersPath])) ?: '(なし)') . "\n";
 echo "────────────────────────────────────────────────────────────\n";
 
 // ケーブルを接続する
@@ -69,27 +85,42 @@ if (isset($options['promiscuous'])) {
     $dataLinkLayer->setPromiscuous(true);
 }
 
+// ネットワーク層の初期化 (IPアドレスがなければデータリンク層だけで動作する)
+$networkLayer = $ip === null ? null : new NetworkLayer($dataLinkLayer, $ip, $mac);
+
 // ワンショット送信モード（引数で --to と --message が渡された場合）
 if (isset($options['to']) && isset($options['message'])) {
     $targetInput = strtoupper($options['to']);
-    $destination = resolveDestination($options['to'], $ethers);
+    $destination = resolveDestination($options['to'], $hosts, $ethers);
     $message = $options['message'];
 
     if ($destination === null) {
-        echo "⚠️ 宛先が正しくありません。ALL、アドレス帳の名前、または12桁のMACアドレスを指定してください。(入力: {$options['to']})\n";
+        echo "⚠️ 宛先が正しくありません。ALL、アドレス帳の名前、IPアドレス、または12桁のMACアドレスを指定してください。(入力: {$options['to']})\n";
         exit(1);
     }
 
-    sendMessage($dataLinkLayer, $destination, $message, $targetInput);
+    sendMessage($dataLinkLayer, $networkLayer, $destination, $message, $targetInput);
+
+    // ARPの応答を受け取るまで待って、待たせていたパケットを送信する
+    $deadline = microtime(true) + ARP_WAIT_SECONDS;
+    while ($networkLayer?->hasPendingPackets() && microtime(true) < $deadline) {
+        $networkLayer->receive();
+    }
+    if ($networkLayer?->hasPendingPackets()) {
+        echo "⚠️ ARPの応答がなく、宛先のMACアドレスを解決できませんでした\n";
+        exit(1);
+    }
     exit(0);
 }
 
 // 対話型＆常時受信モード
 echo "【使い方】\n";
 echo "  誰かに送信: [宛先] [メッセージ]\n";
-echo "    例: aabbccddee0b こんにちは！  (指定したMACアドレス宛てにユニキャスト)\n";
-echo "    例: B こんにちは！             (アドレス帳に登録した名前宛てにユニキャスト)\n";
+echo "    例: 192.168.1.2 こんにちは！   (IPアドレス宛てに送信。MACアドレスはARPで解決)\n";
+echo "    例: B こんにちは！             (hostsに登録した名前のIPアドレス宛てに送信)\n";
+echo "    例: aabbccddee0b こんにちは！  (指定したMACアドレス宛てにイーサネットで直接送信)\n";
 echo "    例: ALL 全員聞いて！       (全員宛てにブロードキャスト)\n";
+echo "  ARPキャッシュの表示: arp\n";
 echo "  終了: quit\n\n";
 echo "[常時受信待機中...] 入力してください > \n";
 
@@ -109,6 +140,11 @@ while (true) {
     $except = null;
     $ready = @stream_select($readStreams, $write, $except, 0, 50000); // 50ms
 
+    // 自分のIPアドレス宛てのパケットはネットワーク層で折り返される
+    while (($localPacket = $networkLayer?->receiveLocal()) !== null) {
+        printReceivedMessage((string)$localPacket->getSource(), $localPacket->getPayload());
+    }
+
     // 自分宛てに送信したフレームと、読み込み済みのフレームは伝送線の監視では検知できない
     $hasPendingFrame = $dataLinkLayer->hasPendingFrame() || $physicalLayer->hasBufferedBurst();
 
@@ -120,10 +156,19 @@ while (true) {
     if ($hasPendingFrame || (is_resource($rxStream) && in_array($rxStream, $readStreams, true))) {
         // データリンク層でフレームを受信
         $frame = $dataLinkLayer->receive();
-        // 上位のプロトコルがまだないので、ここでパディングを除去する
-        $receivedPayload = $frame === null ? '' : rtrim($frame->getPayload(), "\0");
-        if ($receivedPayload !== '') {
-            printReceivedMessage($frame->getSrcMac()->format(), $receivedPayload);
+        $receivedPayload = null;
+        $sender = '';
+        if ($frame !== null && EtherType::fromInt($frame->getEtherType()) === EtherType::LocalExperimental) {
+            // 上位のプロトコルを持たないメッセージには長さ情報がないので、ここでパディングを除去する
+            $receivedPayload = rtrim($frame->getPayload(), "\0");
+            $sender = $frame->getSrcMac()->format();
+        } elseif ($frame !== null) {
+            $packet = $networkLayer?->handleFrame($frame);
+            $receivedPayload = $packet?->getPayload();
+            $sender = (string)$packet?->getSource();
+        }
+        if ($receivedPayload !== null) {
+            printReceivedMessage($sender, $receivedPayload);
         }
     }
 
@@ -145,28 +190,34 @@ while (true) {
             continue;
         }
 
+        if ($line === 'arp') {
+            printArpCache($networkLayer);
+            echo "> ";
+            continue;
+        }
+
         $parts = explode(' ', $line, 2);
         $targetInput = strtoupper($parts[0]);
         $message = $parts[1] ?? 'Hello!';
 
         // フォーマット検証
-        $destination = resolveDestination($parts[0], $ethers);
+        $destination = resolveDestination($parts[0], $hosts, $ethers);
         if ($destination === null) {
-            echo "⚠️ 宛先が正しくありません。ALL、アドレス帳の名前、または12桁のMACアドレスを指定してください。(入力: {$parts[0]})\n";
+            echo "⚠️ 宛先が正しくありません。ALL、アドレス帳の名前、IPアドレス、または12桁のMACアドレスを指定してください。(入力: {$parts[0]})\n";
             echo "> ";
             continue;
         }
 
-        sendMessage($dataLinkLayer, $destination, $message, $targetInput);
+        sendMessage($dataLinkLayer, $networkLayer, $destination, $message, $targetInput);
         echo "> ";
     }
 }
 
 /**
  * ノードの設定ファイル (JSON) を読み込む
- * ethers のパスは設定ファイルからの相対パスとして解決する
+ * hosts と ethers のパスは設定ファイルからの相対パスとして解決する
  *
- * @return array{name?: string, port?: int, mac?: string, ethers?: string}
+ * @return array{name?: string, port?: int, mac?: string, ip?: string, hosts?: string, ethers?: string}
  */
 function loadNodeConfig(string $path): array
 {
@@ -177,10 +228,42 @@ function loadNodeConfig(string $path): array
         exit(1);
     }
 
-    if (isset($config['ethers']) && !str_starts_with($config['ethers'], '/')) {
-        $config['ethers'] = dirname($path) . '/' . $config['ethers'];
+    foreach (['hosts', 'ethers'] as $key) {
+        if (isset($config[$key]) && !str_starts_with($config[$key], '/')) {
+            $config[$key] = dirname($path) . '/' . $config[$key];
+        }
     }
     return $config;
+}
+
+/**
+ * hosts ファイル (<IPアドレス> <名前>) を読み込む
+ *
+ * @return array<string, IpAddress> 大文字の名前 => IPアドレス
+ */
+function loadHosts(string $path): array
+{
+    $lines = @file($path, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        echo "⚠️ hostsファイルを読み込めません: $path\n";
+        exit(1);
+    }
+
+    $hosts = [];
+    foreach ($lines as $i => $line) {
+        $line = trim(explode('#', $line, 2)[0]);
+        if ($line === '') {
+            continue;
+        }
+        $fields = preg_split('/\s+/', $line);
+        $ip = IpAddress::tryFromString($fields[0]);
+        if ($ip === null || count($fields) !== 2) {
+            echo "⚠️ hostsファイルの形式が不正です: $path:" . ($i + 1) . "\n";
+            exit(1);
+        }
+        $hosts[strtoupper($fields[1])] = $ip;
+    }
+    return $hosts;
 }
 
 /**
@@ -214,17 +297,22 @@ function loadEthers(string $path): array
 }
 
 /**
- * 入力された宛先をMACアドレスに変換する。不正な場合は null を返す
+ * 入力された宛先を解決する。不正な場合は null を返す
  *
+ * @param array<string, IpAddress> $hosts
  * @param array<string, MacAddress> $ethers
+ * @return IpAddress|MacAddress|null IPアドレスならネットワーク層、MACアドレスならデータリンク層で送信する
  */
-function resolveDestination(string $input, array $ethers): ?MacAddress
+function resolveDestination(string $input, array $hosts, array $ethers): IpAddress|MacAddress|null
 {
     $key = strtoupper($input);
     if ($key === 'ALL' || $key === 'BROADCAST') {
         return MacAddress::broadcast();
     }
-    return $ethers[$key] ?? MacAddress::tryFromHex($input);
+    return $hosts[$key]
+        ?? IpAddress::tryFromString($input)
+        ?? $ethers[$key]
+        ?? MacAddress::tryFromHex($input);
 }
 
 function printReceivedMessage(string $sender, string $payload): void
@@ -234,11 +322,41 @@ function printReceivedMessage(string $sender, string $payload): void
     echo "> ";
 }
 
-function sendMessage(DataLinkLayer $layer, MacAddress $destMac, string $message, string $targetLabel): void
+/**
+ * ARPキャッシュの内容を表示する
+ */
+function printArpCache(?NetworkLayer $networkLayer): void
 {
-    echo "📤 [SEND] 送信中 -> $targetLabel ({$destMac->format()}): \"$message\"\n";
+    if ($networkLayer === null) {
+        echo "⚠️ IPアドレスが設定されていないので、ARPキャッシュはありません\n";
+        return;
+    }
 
-    // 宛先MACを引数で直接渡してフレーム送信 (ステートレス)
-    $layer->send($message . "\n", $destMac);
+    echo "┌── ARP Cache ──────────────────────────────────────┐\n";
+    foreach ($networkLayer->getArpTable()->getEntries() as $entry) {
+        $remaining = $entry['expiresAt'] === null ? '自分' : sprintf('残り %d 秒', ceil($entry['expiresAt'] - microtime(true)));
+        printf("│  %-15s  %s  %s\n", $entry['ip'], $entry['mac']->format(), $remaining);
+    }
+    echo "└───────────────────────────────────────────────────┘\n";
+}
+
+function sendMessage(
+    DataLinkLayer $dataLinkLayer,
+    ?NetworkLayer $networkLayer,
+    IpAddress|MacAddress $destination,
+    string $message,
+    string $targetLabel
+): void {
+    if ($destination instanceof MacAddress) {
+        echo "📤 [SEND] 送信中 -> $targetLabel ({$destination->format()}): \"$message\"\n";
+        // 宛先MACを引数で直接渡してフレーム送信 (ステートレス)
+        $dataLinkLayer->send($message . "\n", $destination);
+    } elseif ($networkLayer === null) {
+        echo "⚠️ IPアドレス宛てに送信するには、自分のIPアドレスを設定してください\n";
+        return;
+    } else {
+        echo "📤 [SEND] 送信中 -> $targetLabel ($destination): \"$message\"\n";
+        $networkLayer->sendPacket($message, $destination);
+    }
     echo "   └─ 送信完了！\n";
 }

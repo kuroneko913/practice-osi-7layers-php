@@ -17,6 +17,9 @@ $experiments = [
     'flood_sniffing',
     'mac_spoofing',
     'table_overflow',
+    'loop_storm',
+    'arp',
+    'ipv4',
 ];
 
 echo "════════════════════════════════════════════════════════════════\n";

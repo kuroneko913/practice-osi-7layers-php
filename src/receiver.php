@@ -13,6 +13,7 @@ use App\Layers\ApplicationLayer;
 use App\Layers\DataLinkLayer\Factory as DataLinkLayerFactory;
 use App\Layers\DataLinkLayer\MacAddress;
 use App\Layers\NetworkLayer;
+use App\Layers\NetworkLayer\IpAddress;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 
@@ -31,12 +32,11 @@ class Receiver
     public function run()
     {
         while (true) {
-            $frame = $this->layer->receive();
-            if ($frame === null) {
+            $packet = $this->layer->receive();
+            if ($packet === null) {
                 continue;
             }
-            // 上位のプロトコルがまだないので、ここでパディングを除去する
-            $this->log(rtrim($frame->getPayload(), "\0"));
+            $this->log($packet->getPayload());
         }
     }
 
@@ -75,7 +75,7 @@ echo "start receiver ($receiverMac)\n\n";
 $physicalLayer = new PhysicalLayer($cablePath, 'r');
 // どこから来たのかはframeのsrcで判断する
 $dataLinkLayer = DataLinkLayerFactory::createEthernet($physicalLayer, from:new MacAddress($receiverMac), logger:$logger);
-$networkLayer = new NetworkLayer($dataLinkLayer);
+$networkLayer = new NetworkLayer($dataLinkLayer, new IpAddress(getenv('IPADDRESS')), new MacAddress($receiverMac));
 $transportLayer = new TransportLayer($networkLayer);
 $sessionLayer = new SessionLayer($transportLayer);
 $presentationLayer = new PresentationLayer($sessionLayer);
