@@ -3,35 +3,16 @@
 namespace App\Layers\DataLinkLayer;
 
 /**
- * フレームを取り扱うインターフェース
+ * フレームを作成するインターフェース
  */
 interface FrameBuilderInterface
 {
     /**
      * フレームを作成する
-     * @param string $data
-     * @return string
+     * @param string $data ペイロードデータ
+     * @param MacAddress $to 送信先MACアドレス (DEST MAC)
+     * @param EtherType $type ペイロードのプロトコル種別
+     * @return FrameInterface
      */
-    public function buildFrame(string $data): string;
-
-    /**
-     * フレームをパースする
-     * @param string $raw
-     * @return string|null
-     */
-    public function parseFrame(string $raw): ?string;
-
-    /**
-     * フレームが終了しているかどうかを判断する
-     * @param string $raw
-     * @return bool
-     */
-    public function isFrameEnd(string $raw): bool;
-
-    /**
-     * フレーム全体の長さを返す
-     * @param string $raw
-     * @return int
-     */
-    public function getFrameLength(string $raw): int;
+    public function build(string $data, MacAddress $to, EtherType $type): FrameInterface;
 }

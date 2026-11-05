@@ -11,7 +11,8 @@ use App\Layers\SessionLayer;
 use App\Layers\PresentationLayer;
 use App\Layers\ApplicationLayer;
 use App\Layers\DataLinkLayer\Factory as DataLinkLayerFactory;
-use App\Layers\NetworkLayer\Factory as NetworkLayerFactory;
+use App\Layers\DataLinkLayer\MacAddress;
+use App\Layers\NetworkLayer;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 
@@ -30,11 +31,12 @@ class Receiver
     public function run()
     {
         while (true) {
-            $data = $this->layer->receive();
-            if ($data === false || $data === '') {
+            $frame = $this->layer->receive();
+            if ($frame === null) {
                 continue;
             }
-            $this->log($data);
+            // 上位のプロトコルがまだないので、ここでパディングを除去する
+            $this->log(rtrim($frame->getPayload(), "\0"));
         }
     }
 
@@ -66,16 +68,14 @@ posix_mkfifo($cablePath, 0666);
 // 別なレイヤーで追加されるはずだが今はここで設定
 // 自分のMACアドレス
 $receiverMac = getenv('MACADDRESS') ?? null;
-$receiverIp = getenv('IPADDRESS') ?? null;
-$type = '0x0800';
 
 echo "start receiver ($receiverMac)\n\n";
 
 // 各層のインスタンスを作成
 $physicalLayer = new PhysicalLayer($cablePath, 'r');
 // どこから来たのかはframeのsrcで判断する
-$dataLinkLayer = DataLinkLayerFactory::createEthernet($physicalLayer, type:$type, to:$receiverMac, logger:$logger);
-$networkLayer = NetworkLayerFactory::createStringIPPacket(lowerLayer:$dataLinkLayer, receiverIp:$receiverIp, logger:$logger);
+$dataLinkLayer = DataLinkLayerFactory::createEthernet($physicalLayer, from:new MacAddress($receiverMac), logger:$logger);
+$networkLayer = new NetworkLayer($dataLinkLayer);
 $transportLayer = new TransportLayer($networkLayer);
 $sessionLayer = new SessionLayer($transportLayer);
 $presentationLayer = new PresentationLayer($sessionLayer);

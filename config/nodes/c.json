@@ -1,0 +1,6 @@
+{
+    "name": "C",
+    "port": 3,
+    "mac": "aabbccddee0c",
+    "ethers": "../ethers"
+}

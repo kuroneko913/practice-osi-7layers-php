@@ -4,32 +4,40 @@ namespace App\Layers\DataLinkLayer;
 
 use App\Layers\LayerInterface;
 use App\Layers\DataLinkLayer;
-use App\Layers\DataLinkLayer\StringFrameBuilder;
 use Psr\Log\LoggerInterface;
 
+/**
+ * 同じ形式のBuilderとParserを組み合わせてデータリンク層を作成する
+ */
 class Factory
 {
     public static function createString(
         LayerInterface $lowerLayer,
-        string $type = '',
-        string $to = '',
-        string $from = '',
+        MacAddress $from = new MacAddress('000000000000'),
         ?LoggerInterface $logger = null,
     ): DataLinkLayer
     {
-        $builder = new StringFrameBuilder($to, $from, $type);
-        return new DataLinkLayer(lowerLayer:$lowerLayer, frameBuilder:$builder, logger:$logger);
+        return new DataLinkLayer(
+            lowerLayer: $lowerLayer,
+            frameBuilder: new StringFrameBuilder(from: $from),
+            frameParser: new StringFrameParser(),
+            myMac: $from,
+            logger: $logger,
+        );
     }
 
     public static function createEthernet(
         LayerInterface $lowerLayer,
-        string $type = '',
-        string $to = '',
-        string $from = '',
+        MacAddress $from,
         ?LoggerInterface $logger = null,
     ): DataLinkLayer
     {
-        $builder = new EthernetFrameBuilder($to, $from, $type);
-        return new DataLinkLayer(lowerLayer:$lowerLayer, frameBuilder:$builder, logger:$logger);
+        return new DataLinkLayer(
+            lowerLayer: $lowerLayer,
+            frameBuilder: new EthernetFrameBuilder(from: $from),
+            frameParser: new EthernetFrameParser(),
+            myMac: $from,
+            logger: $logger,
+        );
     }
 }

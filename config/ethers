@@ -1,0 +1,6 @@
+# MACアドレスと名前の対応 (Unix の /etc/ethers に相当)
+# 書式: <MACアドレス> <名前>
+aa:bb:cc:dd:ee:0a A
+aa:bb:cc:dd:ee:0b B
+aa:bb:cc:dd:ee:0c C
+aa:bb:cc:dd:ee:0d D

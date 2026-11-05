@@ -7,7 +7,8 @@ require_once dirname(__DIR__, 1) . '/vendor/autoload.php';
 use App\Layers\LayerInterface;
 use App\Layers\PhysicalLayer;
 use App\Layers\DataLinkLayer\Factory as DataLinkLayerFactory;
-use App\Layers\NetworkLayer\Factory as NetworkLayerFactory;
+use App\Layers\DataLinkLayer\MacAddress;
+use App\Layers\NetworkLayer;
 use App\Layers\TransportLayer;
 use App\Layers\SessionLayer;
 use App\Layers\PresentationLayer;
@@ -59,19 +60,14 @@ $logger->pushHandler(new StreamHandler($logFile, Logger::INFO));
 // 別なレイヤーで追加されるはずだが今はここで設定
 // 自分のMACアドレス
 $senderMac = getenv('MACADDRESS') ?? null;
-// 宛先MACアドレス
-$receiverMac = 'aabbccddee02';
-$type = '0x0800'; // デフォルトのIPプロトコル
-$senderIp = getenv('IPADDRESS') ?? null;
-$receiverIp = '192.168.1.2';
 
 echo "start sender ($senderMac)\n\n";
 
 // 各層のインスタンスを作成
 $cablePath = getenv('FIFO_PATH') ?? null;
 $physicalLayer = new PhysicalLayer($cablePath, 'w');
-$dataLinkLayer = DataLinkLayerFactory::createEthernet($physicalLayer, type:$type, to:$receiverMac, from:$senderMac, logger:$logger);
-$networkLayer = NetworkLayerFactory::createStringIPPacket(lowerLayer:$dataLinkLayer, senderIp:$senderIp, receiverIp:$receiverIp, logger:$logger);
+$dataLinkLayer = DataLinkLayerFactory::createEthernet($physicalLayer, from:new MacAddress($senderMac), logger:$logger);
+$networkLayer = new NetworkLayer($dataLinkLayer);
 $transportLayer = new TransportLayer($networkLayer);
 $sessionLayer = new SessionLayer($transportLayer);
 $presentationLayer = new PresentationLayer($sessionLayer);

@@ -11,5 +11,7 @@
             "email": "myblackcat7112+github@gmail.com"
         }
     ],
-    "require": {}
+    "require": {
+        "monolog/monolog": "^3.12"
+    }
 }
