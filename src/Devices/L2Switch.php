@@ -35,6 +35,9 @@ class L2Switch
     /** @var array<string, array{mac: MacAddress, port: int, learnedAt: float, hitCount: int}> MAC(12hex) => 情報 */
     private array $macTable = [];
 
+    /** @var resource|null 伝送線を使っている間持ち続けるロック */
+    private $lock = null;
+
     /**
      * @param int $portCount スイッチのポート数 (デフォルト: 4)
      * @param string $fifoDir FIFOを配置するディレクトリ
@@ -57,7 +60,31 @@ class L2Switch
             mkdir($this->fifoDir, 0777, true);
         }
 
+        $this->lockFifoDir();
         $this->initPorts();
+    }
+
+    /**
+     * 同じ伝送線を使うスイッチが2台動かないようにする
+     *
+     * 2台のスイッチが同じFIFOを読むと、1つのフレームの信号を奪い合って、どちらも壊れたフレームとして破棄してしまう。
+     * ロックはプロセスが終了するとOSが解放するので、強制終了しても次のスイッチを起動できる。
+     */
+    private function lockFifoDir(): void
+    {
+        $lockPath = $this->fifoDir . '/switch.lock';
+        $file = fopen($lockPath, 'c+');
+        if ($file === false || !flock($file, LOCK_EX | LOCK_NB)) {
+            $pid = $file === false ? '' : trim((string)stream_get_contents($file));
+            throw new \RuntimeException(
+                "{$this->fifoDir} では、すでに別のスイッチが動いています" . ($pid === '' ? '' : " (PID: $pid)")
+                . "。そのスイッチを終了するか、FIFO_DIR で別のディレクトリを指定してください"
+            );
+        }
+        ftruncate($file, 0);
+        fwrite($file, (string)getmypid());
+        fflush($file);
+        $this->lock = $file;
     }
 
     /**

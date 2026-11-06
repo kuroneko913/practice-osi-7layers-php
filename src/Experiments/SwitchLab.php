@@ -75,6 +75,11 @@ class SwitchLab
 
         // スイッチの初期化（FIFO作成など）待ち
         usleep(300000); // 300ms
+
+        // 別のスイッチが動いているなどで起動できなかった場合は、実験を続けても意味がない
+        if (!proc_get_status($this->switchProc)['running']) {
+            throw new \RuntimeException("スイッチを起動できませんでした:\n" . file_get_contents($this->switchLogPath));
+        }
     }
 
     private function connectPcs(): void

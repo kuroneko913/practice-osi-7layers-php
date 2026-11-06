@@ -18,12 +18,17 @@ $capture = $capturePath ? new PcapWriter($capturePath) : null;
 
 $keepMacOnLinkDown = (bool)getenv('MAC_KEEP_ON_LINK_DOWN');
 
-$switch = new L2Switch(
-    $portCount,
-    $fifoDir,
-    agingSeconds: $agingSeconds,
-    macTableSize: $macTableSize,
-    capture: $capture,
-    keepMacOnLinkDown: $keepMacOnLinkDown,
-);
+try {
+    $switch = new L2Switch(
+        $portCount,
+        $fifoDir,
+        agingSeconds: $agingSeconds,
+        macTableSize: $macTableSize,
+        capture: $capture,
+        keepMacOnLinkDown: $keepMacOnLinkDown,
+    );
+} catch (\RuntimeException $e) {
+    echo "⚠️ " . $e->getMessage() . "\n";
+    exit(1);
+}
 $switch->run();
