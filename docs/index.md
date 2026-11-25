@@ -5,3 +5,5 @@
 [第2層: データリンク層](DataLinkLayer.md)
 
 [第2層の拡張と限界: L2スイッチと4台のPC実験](L2SwitchAndLimits.md)
+
+[第2層から第3層へ: なぜL2スイッチだけでは足りないのか](WhyLayer3.md)
