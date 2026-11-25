@@ -4,6 +4,7 @@ namespace App\Layers\DataLinkLayer;
 
 /**
  * 受信した信号を Ethernet II フレームとして解釈する
+ * IEEE 802.1Q のVLANタグ付きフレームにも対応する
  */
 class EthernetFrameParser implements FrameParserInterface
 {
@@ -21,21 +22,28 @@ class EthernetFrameParser implements FrameParserInterface
             return null;
         }
 
-        // 短すぎる/長すぎるフレームは破棄
-        $overhead = EthernetFrame::HEADER_BYTES + EthernetFrame::FCS_BYTES;
-        $frameBytes = strlen($bits) / 8;
-        if ($frameBytes < $overhead + EthernetFrame::MIN_PAYLOAD_BYTES
-            || $frameBytes > $overhead + EthernetFrame::MAX_PAYLOAD_BYTES) {
+        $bytes = EthernetFrame::bitsToBytes($bits);
+        if (strlen($bytes) < EthernetFrame::MIN_FRAME_BYTES) {
             return null;
         }
 
-        $bytes = EthernetFrame::bitsToBytes($bits);
+        // EtherTypeの位置にTPIDがあれば、その後ろの2バイトがTCI、さらに後ろが本来のEtherType
+        $tagged = unpack('n', substr($bytes, 12, 2))[1] === EthernetFrame::TPID;
+        $tagBytes = $tagged ? EthernetFrame::TAG_BYTES : 0;
+        $headerBytes = EthernetFrame::HEADER_BYTES + $tagBytes;
+
+        // 長すぎるフレームは破棄 (タグ付きならタグの分だけ長くてよい)
+        if (strlen($bytes) > $headerBytes + EthernetFrame::MAX_PAYLOAD_BYTES + EthernetFrame::FCS_BYTES) {
+            return null;
+        }
+
         return new EthernetFrame(
             destMac: new MacAddress(substr($bytes, 0, 6)),
             srcMac: new MacAddress(substr($bytes, 6, 6)),
-            etherType: unpack('n', substr($bytes, 12, 2))[1],
-            payload: substr($bytes, EthernetFrame::HEADER_BYTES, -EthernetFrame::FCS_BYTES),
+            etherType: unpack('n', substr($bytes, 12 + $tagBytes, 2))[1],
+            payload: substr($bytes, $headerBytes, -EthernetFrame::FCS_BYTES),
             fcs: substr($bytes, -EthernetFrame::FCS_BYTES),
+            tci: $tagged ? unpack('n', substr($bytes, 14, 2))[1] : null,
         );
     }
 }

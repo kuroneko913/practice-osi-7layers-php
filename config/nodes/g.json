@@ -1,0 +1,8 @@
+{
+    "name": "G",
+    "port": 2,
+    "mac": "aabbccddee0f",
+    "ip": "192.168.1.7",
+    "hosts": "../hosts",
+    "fifoDir": "../../tmp/switch2"
+}

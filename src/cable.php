@@ -8,53 +8,66 @@ use App\Layers\DuplexPhysicalLayer;
 use App\Layers\PhysicalLink;
 
 /**
- * スイッチの2つのポートをつなぐLANケーブル (ストレートケーブルの両端を同じスイッチに挿した状態)
+ * 2つのポートをつなぐLANケーブル
  *
  * 片方のポートからスイッチが送信した信号を、そのままもう片方のポートへ流す。
  * フレームとしては解釈しないので、壊れた信号も含めて素通しする。
  * 同じスイッチの2ポートをつなぐとループになり、ブロードキャストが回り続ける (ブロードキャストストーム)。
+ * --fifo-dirs で両端に別々のスイッチを指定すると、2台のスイッチをつなぐケーブルになる。
  * Ctrl+C でプロセスを終了すると、ケーブルを抜いたのと同じ扱いになる。
  */
 
-$options = getopt('', ['ports:', 'delay-ms:']);
+$options = getopt('', ['ports:', 'delay-ms:', 'fifo-dirs:']);
 
+$defaultFifoDir = getenv('FIFO_DIR') ?: (dirname(__DIR__, 1) . '/tmp/switch');
 $ports = explode(',', (string)($options['ports'] ?? '5,6'));
-if (count($ports) !== 2 || !ctype_digit($ports[0]) || !ctype_digit($ports[1]) || $ports[0] === $ports[1]) {
-    echo "使い方: php src/cable.php [--ports=<ポート番号>,<ポート番号>] [--delay-ms=<ミリ秒>]\n";
-    echo "        --ports    ケーブルの両端を挿すポート (デフォルト: 5,6)\n";
-    echo "        --delay-ms 1フレームを通すごとに待つ時間。ループの様子をゆっくり見たいときに使う (デフォルト: 0)\n";
+$fifoDirs = isset($options['fifo-dirs']) ? explode(',', $options['fifo-dirs']) : [$defaultFifoDir, $defaultFifoDir];
+$sameSwitch = count($fifoDirs) === 2 && realpath($fifoDirs[0]) === realpath($fifoDirs[1]);
+if (count($ports) !== 2 || !ctype_digit($ports[0]) || !ctype_digit($ports[1]) || count($fifoDirs) !== 2
+    || ($sameSwitch && $ports[0] === $ports[1])) {
+    echo "使い方: php src/cable.php [--ports=<ポート番号>,<ポート番号>] [--fifo-dirs=<ディレクトリ>,<ディレクトリ>] [--delay-ms=<ミリ秒>]\n";
+    echo "        --ports     ケーブルの両端を挿すポート (デフォルト: 5,6)\n";
+    echo "        --fifo-dirs 両端のスイッチのFIFO配置ディレクトリ。別々のスイッチをつなぐときに指定する (デフォルト: 両端とも FIFO_DIR)\n";
+    echo "        --delay-ms  1フレームを通すごとに待つ時間。ループの様子をゆっくり見たいときに使う (デフォルト: 0)\n";
     echo "        (スイッチは PORT_COUNT=6 などで、ケーブル用のポートを含めて起動してください)\n";
     exit(1);
 }
 $delayMs = (int)($options['delay-ms'] ?? 0);
 
-$fifoDir = getenv('FIFO_DIR') ?: (dirname(__DIR__, 1) . '/tmp/switch');
-if (!is_dir($fifoDir)) {
-    echo "⚠️ FIFOの配置ディレクトリがありません。先にスイッチを起動してください: $fifoDir\n";
-    exit(1);
+foreach ($fifoDirs as $fifoDir) {
+    if (!is_dir($fifoDir)) {
+        echo "⚠️ FIFOの配置ディレクトリがありません。先にスイッチを起動してください: $fifoDir\n";
+        exit(1);
+    }
 }
 
+$label = $sameSwitch
+    ? "Port {$ports[0]} ⇄ Port {$ports[1]}"
+    : basename($fifoDirs[0]) . " Port {$ports[0]} ⇄ " . basename($fifoDirs[1]) . " Port {$ports[1]}";
 echo "╔══════════════════════════════════════════════════════════╗\n";
-echo "║              LANケーブル (Port {$ports[0]} ⇄ Port {$ports[1]})                  ║\n";
+echo "║  LANケーブル ($label)\n";
 echo "╚══════════════════════════════════════════════════════════╝\n";
 
 // ケーブルの両端をポートに挿す
 $ends = [];
-foreach ($ports as $port) {
+foreach ($ports as $i => $port) {
+    $fifoDir = $fifoDirs[$i];
     $link = new PhysicalLink("$fifoDir/port_{$port}.link");
     if (!$link->plugIn()) {
-        echo "⚠️ Port $port にはすでに別の機器が接続しています\n";
+        echo "⚠️ Port $port にはすでに別の機器が接続しています ($fifoDir)\n";
         exit(1);
     }
     // PCと同じ向きで伝送線をつなぐ (ケーブル側から見た送信線 = スイッチの受信線)
     $phy = new DuplexPhysicalLayer("$fifoDir/port_{$port}_to_switch", "$fifoDir/switch_to_port_{$port}", intervalUs: 0);
     $phy->clear();
     $ends[] = ['port' => (int)$port, 'phy' => $phy, 'link' => $link];
-    echo "🔌 Port $port に挿しました\n";
+    echo "🔌 " . ($sameSwitch ? '' : basename($fifoDir) . ' ') . "Port $port に挿しました\n";
 }
 
 echo "────────────────────────────────────────────────────────────\n";
-echo "信号を中継中... 同じスイッチにつないでいるので、ブロードキャストを1通送るとループします\n";
+echo $sameSwitch
+    ? "信号を中継中... 同じスイッチにつないでいるので、ブロードキャストを1通送るとループします\n"
+    : "信号を中継中... 2台のスイッチの間でフレームを運びます\n";
 echo "Ctrl+C でケーブルを抜きます\n\n";
 
 $total = 0;

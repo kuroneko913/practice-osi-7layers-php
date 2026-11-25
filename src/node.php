@@ -47,7 +47,8 @@ $hosts = $hostsPath === null ? [] : loadHosts($hostsPath);
 $ethersPath = $options['ethers'] ?? $config['ethers'] ?? null;
 $ethers = $ethersPath === null ? [] : loadEthers($ethersPath);
 
-$fifoDir = getenv('FIFO_DIR') ?: (dirname(__DIR__, 1) . '/tmp/switch');
+// つなぐスイッチの伝送線の場所。優先順位は 環境変数 > 設定ファイル
+$fifoDir = getenv('FIFO_DIR') ?: ($config['fifoDir'] ?? (dirname(__DIR__, 1) . '/tmp/switch'));
 $txPath = $fifoDir . "/port_{$port}_to_switch";
 $rxPath = $fifoDir . "/switch_to_port_{$port}";
 
@@ -215,9 +216,9 @@ while (true) {
 
 /**
  * ノードの設定ファイル (JSON) を読み込む
- * hosts と ethers のパスは設定ファイルからの相対パスとして解決する
+ * hosts、ethers、fifoDir のパスは設定ファイルからの相対パスとして解決する
  *
- * @return array{name?: string, port?: int, mac?: string, ip?: string, hosts?: string, ethers?: string}
+ * @return array{name?: string, port?: int, mac?: string, ip?: string, hosts?: string, ethers?: string, fifoDir?: string}
  */
 function loadNodeConfig(string $path): array
 {
@@ -228,7 +229,7 @@ function loadNodeConfig(string $path): array
         exit(1);
     }
 
-    foreach (['hosts', 'ethers'] as $key) {
+    foreach (['hosts', 'ethers', 'fifoDir'] as $key) {
         if (isset($config[$key]) && !str_starts_with($config[$key], '/')) {
             $config[$key] = dirname($path) . '/' . $config[$key];
         }

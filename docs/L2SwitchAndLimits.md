@@ -134,6 +134,34 @@ Port 5 ↔ AA:BB:CC:DD:EE:0D  (hits: 68)     ← PC-D (本当は Port 4)
 
 > 💡 同じ `FIFO_DIR` でスイッチが2台動いていると、1つのフレームの信号を2台で奪い合い、どちらも「フレームとして解釈できない信号」として破棄してしまいます。スイッチは `FIFO_DIR/switch.lock` をロックして、2台目の起動を拒否します。
 
+### ⑥ ポートVLAN (`src/Devices/L2Switch.php`)
+- スイッチの起動時に `PORT_VLANS` でポートごとにVLANを割り当てると、同じVLANのポートの間でだけフレームを転送します。指定しなかったポートは VLAN 1 に属します。
+- ブロードキャスト、マルチキャスト、未知の宛先へのフラッディングも同じVLANのポートに限られ、MACアドレステーブルもVLANごとに別々に学習します。
+- VLANをまたいだ通信はできません。ARPのリクエストも届かないので、IPアドレスで送っても相手のMACアドレスを解決できません。VLANの間をつなぐにはルーター（L3）が必要です。
+
+```bash
+PORT_VLANS=1:10,2:10,3:20,4:20 php src/switch.php   # Port 1, 2 を VLAN 10、Port 3, 4 を VLAN 20 にする
+```
+
+- PCがつながるポート（アクセスポート）では、タグのないフレームを送受信します。PC側はVLANを意識しません。
+
+#### トランクポート（IEEE 802.1Q タグ）
+- `TRUNK_PORTS` で指定したポートはトランクポートになり、別のスイッチとつないで、すべてのVLANのフレームを1本の線で運びます。
+- トランクへ送るフレームには、送信元MACアドレスとEtherTypeの間に4バイトのタグ（TPID `0x8100` と VLAN ID）を差し込みます。フレームが変わるのでFCSは計算し直します。受け取ったスイッチはタグでVLANを判断し、PCへ送るときにタグを外します。
+- トランクにタグなしで届いたフレームはネイティブVLAN（`PORT_VLANS` でそのポートに指定したVLAN。未指定なら VLAN 1）として扱い、ネイティブVLANのフレームはタグなしで送ります。アクセスポートにタグ付きフレームが届いた場合は破棄します。
+- タグ付きフレームの最大長は1522バイトです（タグなしは1518バイト）。
+
+2台のスイッチを使う場合は、次のように起動します。2台目のスイッチにつなぐPC（`config/nodes/e.json`、`g.json`）は、設定ファイルの `fifoDir` で2台目の伝送線を使います。
+
+```bash
+PORT_COUNT=5 PORT_VLANS=1:10,2:10,3:20,4:20 TRUNK_PORTS=5 php src/switch.php            # スイッチ1: Port 5 がトランク
+FIFO_DIR=tmp/switch2 PORT_COUNT=3 PORT_VLANS=1:10,2:20 TRUNK_PORTS=3 CAPTURE_PATH=logs/capture2.pcap php src/switch.php   # スイッチ2: Port 3 がトランク
+php src/cable.php --ports=5,3 --fifo-dirs=tmp/switch,tmp/switch2                        # 2台のスイッチをケーブルでつなぐ
+php src/node.php --config=config/nodes/e.json                                           # スイッチ2の Port 1 (VLAN 10) にPC-Eをつなぐ
+```
+
+スイッチ2のキャプチャを Wireshark で開くと、トランクから届いたフレームに `802.1Q Virtual LAN, ID: 10` と表示されます。
+
 ---
 
 ## 3. 実験で観測された現象（動作検証）
@@ -158,6 +186,8 @@ Port 5 ↔ AA:BB:CC:DD:EE:0D  (hits: 68)     ← PC-D (本当は Port 4)
 | **ループ** | `loop_storm.php` | Port 5 と Port 6 をケーブルでつないで、PC-A がブロードキャストを1通送信 | ・フレームが**回り続ける**<br/>・PC-A の MAC が**ポート間を移動し続ける** | ・各 PC に同じフレームのコピーが届き続ける |
 | **ARP** | `arp.php` | PC-A → 192.168.1.2<br/>(MAC アドレスは未解決) | ・リクエストを**フラッディング**<br/>・リプライはユニキャスト転送 | ・PC-B: ⭕ 応答し、パケットを受信<br/>・PC-C: 🛡️ 応答も学習もしない |
 | **IPv4** | `ipv4.php` | PC-A → PC-B<br/>(正常, チェックサム不一致, IP 宛先が別) | ・MAC アドレスだけを見て転送 | ・PC-B: ⭕ 正常なパケットのみ受信し、**全長の欄でパディングを除去** |
+| **VLAN** | `vlan.php` | Port 1, 2 を VLAN 10、Port 3, 4 を VLAN 20 にして送信<br/>(ブロードキャスト, 未知の宛先, 別VLANへの MAC / IP) | ・**同じ VLAN のポートにだけ**フラッディング<br/>・MAC テーブルを VLAN ごとに学習 | ・PC-D: 🛡️ プロミスキャスでも別 VLAN のフレームは届かない<br/>・PC-C: 🛡️ 別 VLAN からは MAC でも IP でも届かない |
+| **VLANトランク** | `vlan_trunk.php` | スイッチ2台の Port 3 同士をトランクでつなぎ、VLAN 10 / 20 の PC 間で送信 | ・トランクへは **802.1Q タグ**を付けて送り、受け取った側がタグで VLAN を判断<br/>・PC へ送るときはタグを外す | ・別のスイッチでも同じ VLAN の PC には届く<br/>・別の VLAN の PC には届かない |
 
 ---
 

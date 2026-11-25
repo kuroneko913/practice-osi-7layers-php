@@ -16,6 +16,7 @@ use App\Layers\PhysicalLink;
 
 /**
  * L2スイッチと4台のPC (A, B, C, D) からなる実験環境
+ * PCの構成とスイッチの名前を指定すると、複数のスイッチを並べてケーブルでつなぐこともできる
  * 実験ごとに生成し、MACアドレステーブルが空の状態から始める
  */
 class SwitchLab
@@ -40,16 +41,22 @@ class SwitchLab
 
     private string $fifoDir;
 
+    /** @var array<string, array{port: int, mac: string, ip: string}> */
+    private array $nodes;
+
     /**
      * @param int $portCount スイッチのポート数 (PCの移動先を用意する場合は5以上)
-     * @param array<string, string> $switchEnv スイッチの設定 (MAC_AGING_SECONDS, MAC_TABLE_SIZE)
+     * @param array<string, string> $switchEnv スイッチの設定 (MAC_AGING_SECONDS, MAC_TABLE_SIZE, PORT_VLANS, TRUNK_PORTS)
+     * @param array<string, array{port: int, mac: string, ip: string}>|null $nodes つなぐPC (未指定時は A, B, C, D)
+     * @param string|null $name スイッチの名前。複数のスイッチを動かすとき、伝送線とログを分けるために指定する
      */
-    public function __construct(private int $portCount = 4, array $switchEnv = [])
+    public function __construct(private int $portCount = 4, array $switchEnv = [], ?array $nodes = null, ?string $name = null)
     {
         $root = dirname(__DIR__, 2);
-        $this->switchLogPath = "$root/logs/switch.log";
+        $this->nodes = $nodes ?? self::NODES;
+        $this->switchLogPath = "$root/logs/" . ($name ?? 'switch') . '.log';
         // 別のスイッチが動いていると伝送線を奪い合うので、FIFO_DIR で分離できるようにする
-        $this->fifoDir = getenv('FIFO_DIR') ?: "$root/tmp/switch";
+        $this->fifoDir = (getenv('FIFO_DIR') ?: "$root/tmp/switch") . ($name === null ? '' : "/$name");
         $this->startSwitch("$root/src/switch.php", $switchEnv);
         $this->connectPcs();
     }
@@ -64,13 +71,13 @@ class SwitchLab
         }
         file_put_contents($this->switchLogPath, ''); // ログクリア
 
-        echo "L2スイッチ (4ポート) を起動しています...\n";
+        echo "L2スイッチ ({$this->portCount}ポート) を起動しています...\n";
         $descriptors = [
             0 => ['pipe', 'r'],
             1 => ['file', $this->switchLogPath, 'a'],
             2 => ['file', $this->switchLogPath, 'a'],
         ];
-        $env = $switchEnv + ['PORT_COUNT' => (string)$this->portCount] + getenv();
+        $env = $switchEnv + ['PORT_COUNT' => (string)$this->portCount, 'FIFO_DIR' => $this->fifoDir] + getenv();
         $this->switchProc = proc_open([PHP_BINARY, $switchScript], $descriptors, $pipes, null, $env);
 
         // スイッチの初期化（FIFO作成など）待ち
@@ -84,8 +91,8 @@ class SwitchLab
 
     private function connectPcs(): void
     {
-        echo "4台のPC (A, B, C, D) のNICと物理層を初期化しています...\n";
-        foreach (self::NODES as $name => $node) {
+        echo count($this->nodes) . '台のPC (' . implode(', ', array_keys($this->nodes)) . ") のNICと物理層を初期化しています...\n";
+        foreach ($this->nodes as $name => $node) {
             $this->plugIn($name, $node['port'], new MacAddress($node['mac']), new IpAddress($node['ip']));
             echo "  ✓ PC-$name: Port {$node['port']}, MAC: {$node['mac']}, IP: {$node['ip']}\n";
         }
@@ -199,6 +206,54 @@ class SwitchLab
         usleep(200000); // スイッチがリンクアップを検知するまで待つ
 
         return $ends;
+    }
+
+    /**
+     * 2台のスイッチのポートをケーブルでつなぐ
+     *
+     * @return array<int, array{phy: DuplexPhysicalLayer, link: PhysicalLink}> ケーブルの両端
+     */
+    public static function plugCable(SwitchLab $labA, int $portA, SwitchLab $labB, int $portB): array
+    {
+        $ends = [$labA->plugCableEnd($portA), $labB->plugCableEnd($portB)];
+        usleep(200000); // スイッチがリンクアップを検知するまで待つ
+        return $ends;
+    }
+
+    /**
+     * @return array{phy: DuplexPhysicalLayer, link: PhysicalLink}
+     */
+    private function plugCableEnd(int $port): array
+    {
+        $link = new PhysicalLink("{$this->fifoDir}/port_{$port}.link");
+        if (!$link->plugIn()) {
+            throw new \RuntimeException("Port $port にはすでに別の機器が接続しています");
+        }
+        $phy = $this->openPort($port);
+        $phy->clear();
+        return ['phy' => $phy, 'link' => $link];
+    }
+
+    /**
+     * ケーブルの信号を、指定した時間だけ反対側へ流す (PCの受信線には触らない)
+     *
+     * @param array<int, array{phy: DuplexPhysicalLayer, link: PhysicalLink}> $ends
+     * @return int ケーブルを通過したフレーム数
+     */
+    public static function relayCable(array $ends, float $seconds): int
+    {
+        $relayed = 0;
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            foreach ([[0, 1], [1, 0]] as [$from, $to]) {
+                while (($burst = $ends[$from]['phy']->tryReceive()) !== null) {
+                    $ends[$to]['phy']->send($burst);
+                    $relayed++;
+                }
+            }
+            usleep(1000);
+        }
+        return $relayed;
     }
 
     /**
